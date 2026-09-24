@@ -1,0 +1,32 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local runtime artifacts (may contain account ids and phone numbers)
+purchases.log
+*.log
+
+# Credentials and local configuration
+.env
+.env.*
+*.env
+.ctm/
+credentials.json
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+# Internal planning artifacts, never published
+.internal/
