@@ -273,7 +273,7 @@ Set `CTM_BASIC_AUTH` and `CTM_ACCOUNT_ID` in the environment first.
 | `whoami` | no | Resolves and reports the account id + name and the token source. |
 | `search_available_numbers` | no | Finds available numbers by area code, ZIP/address, prefix, toll-free, or international pattern. |
 | `buy_numbers` | **yes** | Buys numbers. `dry_run=True` by default; `test=True` buys free test numbers. |
-| `list_routing_targets` | no | Lists tracking sources, receiving numbers, queues, voice menus, and users. |
+| `list_routing_targets` | no | Lists tracking sources, receiving numbers, queues, voice menus, users, smart/conditional routers, geo routers, routing tables, and VoiceAI bots. |
 | `configure_numbers` | **yes** | Applies a name, tracking source, and one call route to one or many numbers. |
 | `release_numbers` | **yes** | Releases numbers. Requires `confirm=True`. |
 
@@ -286,14 +286,20 @@ Set `CTM_BASIC_AUTH` and `CTM_ACCOUNT_ID` in the environment first.
 
 ### `configure_numbers` routes
 
-Pick **at most one**:
+Pick **at most one** route. All of these are verified against the live API
+except `routing_table_id` (see the note below).
 
-- `receiving_number_ids` — forward calls to one or more RPN ids
-- `queue_id` — a call queue (`CQU...`)
-- `voice_menu_id` — a voice menu / IVR (`VOM...`)
-- `user_id` — ring an agent (`USR...`), with `user_no_answer_seconds` and
-  `user_default_action`
-- `route_override` — a raw `{"virtual_phone_number": {…}}` dial-routes body
+| Argument | Id format | Routes to |
+|---|---|---|
+| `receiving_number_ids` | `RPN...` | One or more receiving numbers (`dial[]` populated). |
+| `queue_id` | `CQU...` | A call queue. |
+| `voice_menu_id` | `VOM...` | A voice menu / IVR. |
+| `user_id` | `USR...` | An agent, with `user_no_answer_seconds` and `user_default_action`. |
+| `conditional_router_id` | numeric (e.g. `196`) | A **smart / conditional router**. |
+| `geo_route_id` | `GEO...` | A **geo router**. |
+| `voice_bot_id` | `VBT...` | A **VoiceAI** bot. |
+| `routing_table_id` | `RTT...` | A **routing table**. |
+| `route_override` | — | A raw `{"virtual_phone_number": {…}}` body, if none of the above fit. |
 
 `name` accepts `{n}` (1-based index) and `{number}` placeholders, e.g.
 `"Google Ads {n}"`.
@@ -308,7 +314,9 @@ Pick **at most one**:
 4. **Get explicit confirmation**, then `buy_numbers(dry_run=False)` with
    `test=True` unless the user says it's for real.
 5. **`list_routing_targets`** — present the options; let the user choose the
-   tracking source and route target.
+   tracking source and route target. Route kinds include basic routes (receiving
+   number, queue, voice menu, agent) and advanced routers (smart/conditional
+   router, geo router, routing table, VoiceAI bot).
 6. **`configure_numbers`** — apply the name, source, and exactly one route.
 7. **`release_numbers(…, confirm=True)`** — only if the user explicitly asks,
    typically to clean up test numbers.
@@ -345,6 +353,10 @@ catch it per item so one failure can't abort a batch.
 | List queues | `GET /accounts/{aid}/queues.json` |
 | List voice menus | `GET /accounts/{aid}/voice_menus` |
 | List users | `GET /accounts/{aid}/users` |
+| List smart / conditional routers | `GET /accounts/{aid}/conditional_routers` → `configs[]` |
+| List geo routers | `GET /accounts/{aid}/geo_routes` → `geo_routes[]` |
+| List routing tables | `GET /accounts/{aid}/routing_tables` → `routing_tables[]` |
+| List VoiceAI bots | `GET /accounts/{aid}/voice_bots` → `voice_bots[]` |
 
 ### Search parameters
 
@@ -363,29 +375,60 @@ Search returns up to ~50 numbers per call and includes overlay area codes.
 ### Call-route bodies
 
 ```jsonc
-// queue
+// queue (CQU...)
 {"virtual_phone_number": {"dial_route": "call_queue", "call_queue_id": "CQU..."}}
 
-// voice menu
+// voice menu (VOM...)
 {"virtual_phone_number": {"dial_route": "voice_menu", "voice_menu_id": "VOM..."}}
 
-// agent
+// agent (USR...)
 {"virtual_phone_number": {
   "dial_route": "call_agent",
   "user_id": "USR...",
   "user_default_action_label": "voicemail",
   "user_no_answer_seconds": 25
 }}
+
+// smart / conditional router (the numeric id from GET /conditional_routers)
+{"virtual_phone_number": {
+  "dial_route": "conditional_router",
+  "conditional_router_id": 196
+}}
+
+// geo router (GEO...)
+{"virtual_phone_number": {"dial_route": "geo_config", "geo_config_id": "GEO..."}}
+
+// routing table (RTT...)
+{"virtual_phone_number": {"dial_route": "routing_table", "routing_table_id": "RTT..."}}
+
+// VoiceAI bot (VBT...)
+{"virtual_phone_number": {"dial_route": "voice_bot", "voice_bot_id": "VBT..."}}
 ```
 
 Verified against the live API:
 
-- The queue body above sets `route_to.type == "call_queue"` with
-  `route_to.dial.id` equal to the `CQU...` id.
+- After each of the above, re-reading the number shows `route_to.type` equal to
+  `call_queue`, `voice_menu`, `receiving_number`, `conditional_router`,
+  `geo_config`, or `voice_bot`, with the id echoed under `route_to.dial`.
+- The queue body sets `route_to.type == "call_queue"` with `route_to.dial.id`
+  equal to the `CQU...` id.
 - The tracking-source add works with the `TSO...` id from `GET /sources` (the
   numeric `filter_id` is not required).
 - `GET /numbers/{TPN}` returns the number object directly (not wrapped in a
   `number` key). Route changes are confirmed by re-reading `route_to`.
+
+> **Unverified: `routing_table_id`.** The parameter name and `dial_route` value
+> come from CTM's own frontend, and the request is accepted, but the test account
+> had no routing tables to route to, so a positive `route_to.type ==
+> "routing_table"` could not be observed. Treat it as best-effort until
+> confirmed on an account that has routing tables.
+>
+> **Note on silent failures.** CTM returns `200 {"status": "success"}` for a
+> `dial_routes` PUT even when it ignores an unrecognized route. Always verify by
+> re-reading the number's `route_to` rather than trusting the PUT response.
+> `list_routing_targets` also returns an empty list for a kind with no entries
+> (e.g. `routing_tables`), so "0 results" may mean "none configured" rather than
+> "wrong endpoint".
 
 ### Rate limits
 

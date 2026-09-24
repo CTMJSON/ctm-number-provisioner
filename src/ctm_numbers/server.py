@@ -22,6 +22,23 @@ TARGET_ENDPOINTS: dict[str, tuple[str, str]] = {
     "queues": ("queues.json", "queues"),
     "voice_menus": ("voice_menus", "voice_menus"),
     "users": ("users", "users"),
+    # Advanced routing targets.
+    "conditional_routers": ("conditional_routers", "configs"),
+    "geo_routes": ("geo_routes", "geo_routes"),
+    "routing_tables": ("routing_tables", "routing_tables"),
+    "voice_bots": ("voice_bots", "voice_bots"),
+}
+
+# How each routing target maps onto the dial_routes body. The dial_route value
+# and id key were verified against the live API (see README).
+ROUTE_SPECS: dict[str, tuple[str, str]] = {
+    "queue_id": ("call_queue", "call_queue_id"),
+    "voice_menu_id": ("voice_menu", "voice_menu_id"),
+    "user_id": ("call_agent", "user_id"),
+    "conditional_router_id": ("conditional_router", "conditional_router_id"),
+    "geo_route_id": ("geo_config", "geo_config_id"),
+    "routing_table_id": ("routing_table", "routing_table_id"),
+    "voice_bot_id": ("voice_bot", "voice_bot_id"),
 }
 
 mcp = FastMCP("ctm-number-provisioner")
@@ -346,7 +363,8 @@ async def list_routing_targets(
 
     Args:
         kinds: Subset of ["sources", "receiving_numbers", "queues",
-               "voice_menus", "users"]. Default: the first four.
+               "voice_menus", "users", "conditional_routers", "geo_routes",
+               "routing_tables", "voice_bots"]. Default: the first four.
         search: Case-insensitive substring filter on the row's fields.
     """
     wanted = kinds or ["sources", "receiving_numbers", "queues", "voice_menus"]
@@ -394,6 +412,18 @@ def _compact_target(kind: str, item: dict[str, Any]) -> dict[str, Any]:
             filter(None, [item.get("first_name"), item.get("last_name")])
         )
         row["email"] = item.get("email")
+    elif kind == "conditional_routers":
+        row["rules"] = len(item.get("routing_rules") or [])
+        row["route_to_type"] = item.get("route_to_type")
+        row["description"] = item.get("description") or None
+    elif kind == "geo_routes":
+        row["route_by"] = item.get("route_by")
+        row["default_state"] = item.get("default_state")
+        row["description"] = item.get("description") or None
+    elif kind == "routing_tables":
+        row["description"] = item.get("description") or None
+    elif kind == "voice_bots":
+        row["description"] = item.get("description") or None
     return row
 
 
@@ -412,6 +442,10 @@ async def configure_numbers(
     queue_id: str | None = None,
     voice_menu_id: str | None = None,
     user_id: str | None = None,
+    conditional_router_id: str | None = None,
+    geo_route_id: str | None = None,
+    routing_table_id: str | None = None,
+    voice_bot_id: str | None = None,
     user_no_answer_seconds: int = 25,
     user_default_action: str = "voicemail",
     route_override: dict[str, Any] | None = None,
@@ -423,7 +457,10 @@ async def configure_numbers(
     Get ids from list_routing_targets and let the user choose them. Pick at most
     ONE route: receiving_number_ids, queue_id (CQU...), voice_menu_id (VOM...),
     user_id (USR..., rings an agent), or route_override (raw
-    {"virtual_phone_number": {...}} dial_routes body).
+    {"virtual_phone_number": {...}} dial_routes body). Pick at most ONE route:
+    receiving_number_ids, queue_id (CQU...), voice_menu_id (VOM...),
+    user_id (USR...), conditional_router_id (smart router), geo_route_id (GEO...),
+    routing_table_id (RTT...), voice_bot_id (VBT...), or route_override.
 
     Args:
         tpn_ids: Tracking numbers to configure (TPN...).
@@ -436,13 +473,24 @@ async def configure_numbers(
     """
     routes = [
         x
-        for x in (receiving_number_ids, queue_id, voice_menu_id, user_id, route_override)
+        for x in (
+            receiving_number_ids,
+            queue_id,
+            voice_menu_id,
+            user_id,
+            conditional_router_id,
+            geo_route_id,
+            routing_table_id,
+            voice_bot_id,
+            route_override,
+        )
         if x
     ]
     if len(routes) > 1:
         return {
             "error": "Pick only one route: receiving_number_ids, queue_id, "
-            "voice_menu_id, user_id, or route_override."
+            "voice_menu_id, user_id, conditional_router_id, geo_route_id, "
+            "routing_table_id, voice_bot_id, or route_override."
         }
     if not tpn_ids:
         return {"error": "tpn_ids is empty."}
@@ -464,6 +512,28 @@ async def configure_numbers(
                 "user_default_action_label": user_default_action,
                 "user_no_answer_seconds": user_no_answer_seconds,
             }
+        }
+    elif conditional_router_id:
+        dial_body = {
+            "virtual_phone_number": {
+                "dial_route": "conditional_router",
+                "conditional_router_id": conditional_router_id,
+            }
+        }
+    elif geo_route_id:
+        dial_body = {
+            "virtual_phone_number": {"dial_route": "geo_config", "geo_config_id": geo_route_id}
+        }
+    elif routing_table_id:
+        dial_body = {
+            "virtual_phone_number": {
+                "dial_route": "routing_table",
+                "routing_table_id": routing_table_id,
+            }
+        }
+    elif voice_bot_id:
+        dial_body = {
+            "virtual_phone_number": {"dial_route": "voice_bot", "voice_bot_id": voice_bot_id}
         }
 
     client = _client(account_id, token_name)

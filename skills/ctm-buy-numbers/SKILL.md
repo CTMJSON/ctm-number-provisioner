@@ -1,6 +1,6 @@
 ---
 name: ctm-buy-numbers
-description: "Buy, purchase, or provision CTM tracking numbers and configure them - search available numbers, buy one or many, then attach a tracking source and a call route (receiving number, queue, voice menu, or agent). Use when the user asks to buy/purchase/provision tracking numbers, add numbers to an account, or set up routing for new numbers."
+description: "Buy, purchase, or provision CTM tracking numbers and configure them - search available numbers, buy one or many, then attach a tracking source and a call route (receiving number, queue, voice menu, agent, smart/conditional router, geo router, routing table, or VoiceAI bot). Use when the user asks to buy/purchase/provision tracking numbers, add numbers to an account, or set up routing for new numbers."
 ---
 
 # Buy and configure CTM tracking numbers
@@ -47,7 +47,11 @@ Call `list_routing_targets` and let the user choose — do not choose for them.
 
 1. **Tracking source** (optional): present the `sources` list, let them pick one.
    Use the `id` (TSO...) when calling `configure_numbers`.
-2. **Route type**: ask which kind — receiving number, queue, voice menu, or agent.
+2. **Route type**: ask which kind. Options:
+   - basic: receiving number, queue, voice menu, agent
+   - advanced routers: smart / conditional router, geo router, routing table,
+     VoiceAI bot (fetch with `kinds=["conditional_routers", "geo_routes",
+     "routing_tables", "voice_bots"]`)
 3. **Specific target**: show that kind's list and let them pick one.
 
 With more than four options, show a numbered list and have the user reply with a
@@ -61,9 +65,13 @@ formatted phone number. Example: `"Google Ads {n}"`.
 ## 6. Configure
 
 Call `configure_numbers` with the tpn_ids from the purchase, the chosen `name`,
-`source_id`, and exactly one route (`receiving_number_ids` / `queue_id` /
-`voice_menu_id` / `user_id`). Present the per-TPN step results and offer to retry
-any failures.
+`source_id`, and exactly one route. Use the matching argument for the chosen
+route kind: `receiving_number_ids`, `queue_id`, `voice_menu_id`, `user_id`,
+`conditional_router_id`, `geo_route_id`, `routing_table_id`, or `voice_bot_id`.
+
+Afterwards, verify by reading the number back and checking `route_to.type` — CTM
+returns success even when it silently ignores a route it doesn't recognize.
+Present the per-TPN step results and offer to retry any failures.
 
 ## 7. Summarize
 

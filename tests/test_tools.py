@@ -308,6 +308,90 @@ async def test_configure_captures_step_errors():
     assert out["results"][0]["steps"][0]["status"] == "error"
 
 
+@respx.mock
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        (
+            {"conditional_router_id": "196"},
+            {"dial_route": "conditional_router", "conditional_router_id": "196"},
+        ),
+        (
+            {"geo_route_id": "GEO123"},
+            {"dial_route": "geo_config", "geo_config_id": "GEO123"},
+        ),
+        (
+            {"routing_table_id": "RTT123"},
+            {"dial_route": "routing_table", "routing_table_id": "RTT123"},
+        ),
+        (
+            {"voice_bot_id": "VBT123"},
+            {"dial_route": "voice_bot", "voice_bot_id": "VBT123"},
+        ),
+    ],
+)
+async def test_configure_advanced_route_bodies(kwargs, expected):
+    dial = respx.put(f"{BASE}/accounts/{AID}/numbers/TPN1/dial_routes").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    out = await server.configure_numbers(["TPN1"], **kwargs)
+    assert out["with_errors"] == 0
+    assert json.loads(dial.calls[0].request.content) == {"virtual_phone_number": expected}
+
+
+@respx.mock
+async def test_configure_rejects_multiple_advanced_routes():
+    out = await server.configure_numbers(["TPN1"], queue_id="CQU1", voice_bot_id="VBT1")
+    assert "error" in out
+    assert "queue_id" in out["error"] and "voice_bot_id" in out["error"]
+
+
+@respx.mock
+async def test_list_advanced_targets():
+    respx.get(f"{BASE}/accounts/{AID}/conditional_routers").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "configs": [
+                    {"id": 196, "name": "New Female Callers", "routing_rules": [1, 2]}
+                ],
+                "total_pages": 1,
+            },
+        )
+    )
+    respx.get(f"{BASE}/accounts/{AID}/geo_routes").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "geo_routes": [{"id": "GEO1", "name": "Main Line", "route_by": "zipcode"}],
+                "total_pages": 1,
+            },
+        )
+    )
+    respx.get(f"{BASE}/accounts/{AID}/voice_bots").mock(
+        return_value=httpx.Response(
+            200,
+            json={"voice_bots": [{"id": "VBT1", "name": "Receptionist"}], "total_pages": 1},
+        )
+    )
+    respx.get(f"{BASE}/accounts/{AID}/routing_tables").mock(
+        return_value=httpx.Response(204)
+    )
+    out = await server.list_routing_targets(
+        kinds=["conditional_routers", "geo_routes", "voice_bots", "routing_tables"]
+    )
+    assert out["conditional_routers"][0] == {
+        "id": 196,
+        "name": "New Female Callers",
+        "rules": 2,
+        "route_to_type": None,
+        "description": None,
+    }
+    assert out["geo_routes"][0]["route_by"] == "zipcode"
+    assert out["voice_bots"][0]["id"] == "VBT1"
+    assert out["routing_tables"] == []
+
+
 # --------------------------------------------------------------------------- #
 # release
 # --------------------------------------------------------------------------- #
